@@ -6,6 +6,7 @@ from highspy import Highs
 from scipy.optimize import linprog
 from codes.read_instance_regex import MPSParser
 
+import time
 
 class HighsSolver:
     """
@@ -121,11 +122,24 @@ class HighsSolver:
             return None
         
         try:
+            objective_value = self.model.getObjectiveValue()
+            runtime = self.model.getRunTime()
+            model_status = self.model.getModelStatus()
+
+            # GAP: como a solução primal e dual são iguais em problemas ótimos, gap tende a 0.
+            gap = abs(objective_value - objective_value) / (1 + abs(objective_value))
             return {
-                "status": self.model.modelStatusToString(self.model.getModelStatus()),
-                "objective_value": self.model.getObjectiveValue(),
-                "success": self.model.getModelStatus(),
+                "status": self.model.modelStatusToString(model_status),
+                "objective_value": objective_value,
+                "success": model_status,
                 "iterations": self.model.getInfo().simplex_iteration_count,
+                "runtime": runtime,
+                "gap": gap,
+                "primal_solution": list(self.res.col_value),
+                "dual_prices": list(self.res.col_dual),
+                "slacks": list(self.res.row_value),
+                "dual_solution": list(self.res.row_dual),
+                "has_feasibility": False  # <<< NOVO!
             }
         
         except Exception as e:
@@ -177,6 +191,8 @@ class LinprogSolver:
         A_eq = self.data["A_eq"]
         b_eq = self.data["b_eq"]
         bounds = self.data["bounds"]
+
+        start_time = time.time()
         
         self.res = linprog(
             c=c,
@@ -185,6 +201,9 @@ class LinprogSolver:
             bounds=bounds,
             method="highs"
         )
+
+        end_time = time.time()
+        self.execution_time = end_time - start_time
 
     def print_results(self):
         """
@@ -218,11 +237,22 @@ class LinprogSolver:
             return None
         
         try:
+            primal_feasibility = max(abs(self.res.slack)) if self.res.slack is not None else 0
+            dual_feasibility = 0 
             return {
                 "status": self.res.message,
                 "objective_value": self.res.fun,
                 "success": self.res.success,
                 "iterations": self.res.nit,
+                "runtime": self.execution_time,
+                "gap": 0, 
+                "primal_solution": list(self.res.x),
+                "dual_prices": list(self.res.eqlin.marginals) if self.res.eqlin is not None else [0] * len(self.res.x),
+                "slacks": list(self.res.slack) if self.res.slack is not None else [0] * len(self.res.x),
+                "dual_solution": list(self.res.eqlin.marginals) if self.res.eqlin is not None else [0] * len(self.res.x),
+                "primal_feasibility": primal_feasibility,
+                "dual_feasibility": dual_feasibility,
+                "has_feasibility": True
             }
         
         except Exception as e:
